@@ -25,9 +25,7 @@ import { setCoach } from './surfaces/coach-service.ts'
 import { createBudget } from './core/budget.ts'
 import { createLlmCall } from './core/llm-call.ts'
 import { createSse } from './core/sse.ts'
-import { DISTILL_PREFILTER, distillerProfile } from './agents/memory_distiller.ts'
-import { lastPersonText } from './core/turn-text.ts'
-import { sessionKey } from './plan-hold.ts'
+import { registerMemoryDistillation } from './agents/memory-turn.ts'
 import { agentConfig } from './config.ts'
 import type { HealthEventType } from './contracts/events.ts'
 import { addDays } from './interventions.ts'
@@ -374,24 +372,12 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     snapshot: snapshotNow,
     log: (message) => logTo(ctx, 'warn', message),
   })
-  // After a health turn whose words hint at something to keep: the memory distiller, in the background.
-  ctx.on('agent/turn-stopping', (payload) => {
-    try {
-      const agent = (payload as unknown as { agent?: unknown }).agent
-      const session = sessionKey(agent)
-      const health = orchestrator.isHealth(agent)
-      const text = lastPersonText(session)
-      const hit = health && DISTILL_PREFILTER.test(text)
-      bus.emit('chat.turn_ended', { session_id: session, turn: Number((payload as unknown as { turn?: unknown }).turn ?? 0), health, prefilter_hit: hit }, { module: 'M0', via: 'hook', session_id: session })
-      if (!hit) return
-      const pack = currentSurfaces(dataDirNow())?.pack
-      if (!pack) return
-      void llmCall.structured({ profile: distillerProfile, pack, extra: { message: text, session_id: session, today: isoDay() } }).then(({ value }) => {
-        if (value.length > 0) memoryFor(dataDirNow()).apply(value, 'M0')
-      }).catch(() => {})
-    } catch {
-      // the turn closes regardless
-    }
+  registerMemoryDistillation(ctx, {
+    isHealth: orchestrator.isHealth,
+    rootDir: () => resolveRootDir(source().dataDir),
+    llm: llmCall,
+    bus,
+    log: (message) => logTo(ctx, 'warn', message),
   })
 
 }

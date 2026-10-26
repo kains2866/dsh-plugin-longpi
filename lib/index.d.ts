@@ -4758,7 +4758,7 @@ interface MemoryStore extends MemoryApi {
   exclusionIds(phrase: string): Id[];
   latestCare(): CareItem | null;
 }
-declare function createMemory(dataDir: () => string): MemoryStore;
+declare function createMemory(dataDir: () => string, bus?: () => Bus | null): MemoryStore;
 /** The memory of the person whose data lives in dataDir (one profile = one person). Legacy files are imported on first use. */
 declare function memoryFor(dataDir: string): MemoryStore;
 /**
@@ -5481,7 +5481,7 @@ declare function startRun(deps: CoreDeps, opts: {
 declare function abandon(deps: CoreDeps, runId: string): boolean;
 declare function statusNow(deps: CoreDeps): Promise<{
   runs: {
-    trigger: "ai" | "member";
+    trigger: "member" | "ai";
     reason_zh: string;
     id: string;
     started_at: string;
