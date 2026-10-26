@@ -32,7 +32,7 @@ export function registerAnalysisTools(ctx: Context, deps: CoreDeps): void {
 
   ctx.tools.register(defineTool({
     name: 'import_analysis',
-    description: 'Bring a finished deep analysis into LongPi: its report, organ table, question board and readouts appear on the 健康 page (深度分析). Returns the plan read back for the person. The plan is saved only after they confirm it: then call save_intervention_plan with the returned plan (confirm:false first, read it back, then confirm:true), or they click 接受方案 on the page.',
+    description: 'Bring a finished deep analysis into LongPi: its report, organ table, question board and readouts appear on the 健康 page (深度分析). Returns the plan read back for the person. When the analysis belongs to a member other than the one shown on the page, plan_for_save is null: the plan is read back in words only and saved after switching to that member. The plan is saved only after they confirm it: then call save_intervention_plan with the returned plan (confirm:false first, read it back, then confirm:true), or they click 接受方案 on the page.',
     parameters: {
       run_id: { type: 'string', description: 'A run id from run_deep_analysis; omit for the latest finished run.' },
     },
@@ -42,10 +42,16 @@ export function registerAnalysisTools(ctx: Context, deps: CoreDeps): void {
     async execute(args: { run_id?: string }) {
       const res = await importLatest(deps, args.run_id ?? null)
       if (!res.ok) return asJson({ ...res, how_to_use: 'Say error_zh; the problems list is for you, not the person.' })
+      const shown = res.owner.is_current
       return asJson({
         ...res,
-        plan_for_save: res.read_back.plan,
-        how_to_use: 'Tell the person the result is on the 健康 page under 深度分析. Read the plan items back in plain words (no doses) and ask whether to adopt it; only on a yes, save it through save_intervention_plan with plan_for_save. read_back.doctor_items are for a doctor (supplements, tests, referrals): never add them to the plan; say how many there are and offer the doctor brief (prepare_doctor_brief), which lists them. When compare is ok, name only the rows whose verdict is beyond noise, with both values; within_noise means the change cannot be told from normal fluctuation yet; never call a not-judged value better or worse. A compare alert (a genotype that changed) comes first.',
+        // A plan that belongs to another member is read back in words only: neither the saveable plan nor plan_for_save
+        // is handed over, because save_intervention_plan writes to the member the page shows.
+        read_back: shown ? res.read_back : { ...res.read_back, plan: null },
+        plan_for_save: shown ? res.read_back.plan : null,
+        how_to_use: shown
+          ? 'Tell the person the result is on the 健康 page under 深度分析. Read the plan items back in plain words (no doses) and ask whether to adopt it; only on a yes, save it through save_intervention_plan with plan_for_save. read_back.doctor_items are for a doctor (supplements, tests, referrals): never add them to the plan; say how many there are and offer the doctor brief (prepare_doctor_brief), which lists them. When compare is ok, name only the rows whose verdict is beyond noise, with both values; within_noise means the change cannot be told from normal fluctuation yet; never call a not-judged value better or worse. A compare alert (a genotype that changed) comes first.'
+          : `This analysis belongs to ${res.owner.label_zh}, not to the member the page shows now: it is imported into ${res.owner.label_zh}'s record, so the 健康 page here does not show it. Tell the person the analysis for ${res.owner.label_zh} is imported, and that they can see it by switching 在看 at the top of the 健康 page to ${res.owner.label_zh}. read_back.plan and plan_for_save are null on purpose: do not call save_intervention_plan for this plan now, because that would save it into the member the page shows. Read read_back items back only as ${res.owner.label_zh}'s plan (no doses), never as the shown member's; after switching to ${res.owner.label_zh}, call import_analysis again with this run_id to get the saveable plan, or accept it on the page. read_back.doctor_items are for a doctor, not the plan. When compare is ok, name only the rows whose verdict is beyond noise, with both values; within_noise is not a change yet. A compare alert comes first.`,
       })
     },
   }))
