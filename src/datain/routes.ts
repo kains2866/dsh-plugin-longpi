@@ -12,7 +12,7 @@ import { listMedications, rememberMedication } from './meds.ts'
 import { isStoreKind, readStored, storeIsOn } from '../stores/index.ts'
 import { STORE_KINDS } from '../stores/limits.ts'
 import { findingsFromIndicators, listFindings } from './narrative.ts'
-import { ingestDocument, type SocketOpener } from './upload.ts'
+import { ingestDocument, type IngestResult, type SocketOpener } from './upload.ts'
 
 const CHUNK_RAW = 24 * 1024
 const MAX_FILE = 32 * 1024 * 1024
@@ -84,6 +84,21 @@ function bodyOf(body: unknown): Record<string, unknown> {
 
 function fail(error: string, status = 400): { ok: false; status: number; error: string } {
   return { ok: false, status, error }
+}
+
+/**
+ * A failed upload as the page must see it. A file the service received but could not read is a 422; a file it did
+ * not receive is a 502; a timeout is neither (the service may have saved it), so it stays 200 + ok:false with
+ * timed_out set and the page says the state is unknown.
+ */
+export function uploadFailure(result: IngestResult): { ok: false; status: number; error: string } | null {
+  if (result.ok !== false || result.timed_out) return null
+  const error = result.error || '这份报告没有读取成功。'
+  // A local check (too large, no usable rows) never reached the service; an unconnected service is not a gateway error.
+  if (result.stage === 'local' || result.stores !== undefined) return fail(error, 400)
+  if (result.stage === 'connect') return fail(error, 409)
+  if (result.forwarded) return fail(error, 422)
+  return fail(error, 502)
 }
 
 export function registerDatainRoutes(deps: CoreDeps, open?: SocketOpener): void {
@@ -204,8 +219,9 @@ export function registerDatainRoutes(deps: CoreDeps, open?: SocketOpener): void 
       if (text.length > 200_000) return fail('粘贴的文字太长。请改为上传文件。')
       const result = await ingestDocument(deps, { filename: typeof value.filename === 'string' ? value.filename : 'pasted.txt', text, upload: false, ...fields })
       if (result.needs_confirm) return fail(result.error || result.read_back_zh)
-      // Received but not read: shown as an error with its cause and what to do, never as a quiet「0 项」.
-      if (result.ok === false && result.forwarded && result.error) return fail(result.error, 422)
+      // Received but not read, or not received: a failure status with its cause, never a quiet「已读取」.
+      const failure = uploadFailure(result)
+      if (failure) return failure
       return result
     }
     if (op === 'path') {
@@ -214,6 +230,8 @@ export function registerDatainRoutes(deps: CoreDeps, open?: SocketOpener): void 
       try {
         const result = await ingestDocument(deps, { filename: path.split('/').pop() || 'report', path, open, ...fields })
         if (result.needs_confirm) return fail(result.error || result.read_back_zh)
+        const failure = uploadFailure(result)
+        if (failure) return failure
         return result
       } catch (error) {
         return fail(error instanceof Error ? '无法读取该文件。' : '无法读取该文件。')
@@ -249,6 +267,8 @@ export function registerDatainRoutes(deps: CoreDeps, open?: SocketOpener): void 
       pending.delete(id)
       const result = await ingestDocument(deps, { filename: row.filename, bytes, open, ...fromPending(row) })
       if (result.needs_confirm) return fail(result.error || result.read_back_zh)
+      const failure = uploadFailure(result)
+      if (failure) return failure
       return result
     }
     return fail('无法识别的上传步骤。')

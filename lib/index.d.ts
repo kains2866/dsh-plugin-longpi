@@ -5815,6 +5815,8 @@ interface MirobodyPush {
   indicators: number | null;
   checkup_day: string | null;
   failed: boolean;
+  /** The deadline fired with no answer: the service may or may not have saved the file. Not a refusal, not a success. */
+  timed_out: boolean;
   /** The file arrived but reading it did not: no model is configured in the service, or its call failed. */
   extraction_failed: boolean;
 }
