@@ -59,7 +59,12 @@ interface UploadLog {
   wrong_person?: boolean
   /** How many lab values the service read from it (absent in logs written before 0.7.1). */
   indicators?: number | null
+  /** Which text-fingerprint algorithm wrote this row; rows without it hold the old 4000-character prefix hash. */
+  fingerprint_version?: number
 }
+
+/** Fingerprint version 2 hashes the whole normalized text; older rows cannot be compared with it (they keep the sha check). */
+const FINGERPRINT_VERSION = 2
 
 function keptUpload(row: UploadLog): boolean {
   if (row.wrong_person) return false
@@ -321,14 +326,14 @@ export async function ingestDocument(deps: Pick<CoreDeps, 'config' | 'dataDir' |
       }
     }
     bytes = readFileSync(filePath)
-    if (!text && extname(filePath).toLowerCase() === '.pdf') text = pdfText(filePath)
+    if (!text && extname(filePath).toLowerCase() === '.pdf') text = pdfText(filePath, pages ?? PAGE_CAP)
     if (!text && contentTypeOf(filePath) === 'text/plain') text = bytes.toString('utf8')
   }
   bytes = bytes ?? Buffer.from(text, 'utf8')
   if (!text && contentTypeOf(filename) === 'text/plain') text = bytes.toString('utf8')
   const sha = createHash('sha256').update(bytes).digest('hex')
   const fingerprint = textFingerprint(text)
-  const prior = readLog(dataDir).find((row) => keptUpload(row) && ((sha && row.sha256 === sha) || (fingerprint && row.fingerprint === fingerprint)))
+  const prior = readLog(dataDir).find((row) => keptUpload(row) && ((sha && row.sha256 === sha) || (fingerprint && row.fingerprint_version === FINGERPRINT_VERSION && row.fingerprint === fingerprint)))
   if (prior) {
     const existing = listFindings(dataDir).filter((row) => row.upload_id === prior.id)
     return {
@@ -348,7 +353,7 @@ export async function ingestDocument(deps: Pick<CoreDeps, 'config' | 'dataDir' |
     const summary = storeGenetics(dataDir, extractGeneticsText(text, 'text'))
     const uploadId = newId('up')
     const finding = storeFindings(dataDir, [{ id: newId('find'), date: summary.generated, kind: 'genetics', text_zh: summary.headlines_zh[0] || '已记录基因报告。' }], uploadId)
-    appendJsonl(logPath(dataDir), { id: uploadId, at: new Date().toISOString(), filename, sha256: sha, fingerprint, bytes: bytes.length, checkup_day: summary.generated || null, forwarded: false, accepted: true } satisfies UploadLog)
+    appendJsonl(logPath(dataDir), { id: uploadId, at: new Date().toISOString(), filename, sha256: sha, fingerprint, fingerprint_version: FINGERPRINT_VERSION, bytes: bytes.length, checkup_day: summary.generated || null, forwarded: false, accepted: true } satisfies UploadLog)
     return {
       ok: true, forwarded: false, duplicate: false, wrong_person: false, checkup_day: summary.generated || null, indicators: null,
       findings: finding.map(publicFinding),
@@ -361,7 +366,7 @@ export async function ingestDocument(deps: Pick<CoreDeps, 'config' | 'dataDir' |
     const row = storeFindings(dataDir, [{
       id: newId('find'), date: '', kind: 'wrong_person', text_zh: identity.reason_zh, page_note_zh: identity.page_note_zh,
     }])
-    appendJsonl(logPath(dataDir), { id: newId('up'), at: new Date().toISOString(), filename, sha256: sha, fingerprint, bytes: bytes.length, checkup_day: null, forwarded: false, wrong_person: true } satisfies UploadLog)
+    appendJsonl(logPath(dataDir), { id: newId('up'), at: new Date().toISOString(), filename, sha256: sha, fingerprint, fingerprint_version: FINGERPRINT_VERSION, bytes: bytes.length, checkup_day: null, forwarded: false, wrong_person: true } satisfies UploadLog)
     return {
       ok: true, forwarded: false, duplicate: false, wrong_person: true, checkup_day: null, indicators: null,
       findings: row.map((item) => ({ id: item.id, kind: item.kind, text_zh: item.text_zh, date: item.date })),
@@ -425,7 +430,7 @@ function takeOmics(deps: Pick<CoreDeps, 'dataDir'>, bag: {
   if (!localOnly) return { stores: saved.summaries }
   if (stored) {
     appendJsonl(logPath(deps.dataDir()), {
-      id: newId('up'), at: new Date().toISOString(), filename, sha256: bag.sha, fingerprint: bag.fingerprint,
+      id: newId('up'), at: new Date().toISOString(), filename, sha256: bag.sha, fingerprint: bag.fingerprint, fingerprint_version: FINGERPRINT_VERSION,
       bytes: bag.bytes.length, checkup_day: input.sample_date ?? null, forwarded: false, accepted: true,
     } satisfies UploadLog)
   }
@@ -501,7 +506,7 @@ async function finishForward(deps: Pick<CoreDeps, 'config' | 'dataDir' | 'bus' |
   const accepted = forwarded || localOnly
   if (accepted) {
     appendJsonl(logPath(dataDir), {
-      id: uploadId, at: new Date().toISOString(), filename: input.filename, sha256: input.sha, fingerprint: input.fingerprint,
+      id: uploadId, at: new Date().toISOString(), filename: input.filename, sha256: input.sha, fingerprint: input.fingerprint, fingerprint_version: FINGERPRINT_VERSION,
       bytes: input.bytes.length, checkup_day: day, forwarded, accepted: true, indicators: extractionFailed ? 0 : push?.indicators ?? null,
     } satisfies UploadLog)
   }
