@@ -3,6 +3,7 @@
 
 import { randomBytes } from 'node:crypto'
 import { resolveRootDir } from '../paths.ts'
+import { ownerOfStore, storeIdentity, storeIsCurrent, storeStillTheirs } from '../member-store.ts'
 import { renewActiveMember } from '../people/mirobody.ts'
 import type { CoreDeps } from '../contracts/index.ts'
 import { connectionUrlProblem, loginMirobody, maskMcpUrl, saveConnection, testConnection } from '../connection.ts'
@@ -103,16 +104,35 @@ export function uploadFailure(result: IngestResult): { ok: false; status: number
 
 export function registerDatainRoutes(deps: CoreDeps, open?: SocketOpener): void {
   deps.http.route('GET', '/api/longpi/findings', async () => {
+    // The page can switch members while the record is read: pin the member whose page asked, read that member's own
+    // record, and write the findings derived from it only into that same store. A request whose member or store is
+    // gone by the time the read finishes writes nothing (and recreates nothing), and says it is stale.
     const dataDir = deps.dataDir()
+    const root = resolveRootDir(deps.config().dataDir)
+    const owner = ownerOfStore(root, dataDir)
+    const store = storeIdentity(dataDir)
+    // stale means the request's member/store is no longer valid, so nothing was written; it is not "the page moved on".
+    let stale = !owner || !store
     try {
-      const context = await deps.context()
-      findingsFromIndicators(dataDir, context.records.indicators)
+      let context = await deps.context()
+      const readFor = (context as { dataDir?: unknown }).dataDir
+      // A page switch can make the page context resolve to another member: then read the captured member's own context.
+      const ownContext = typeof readFor === 'string' ? readFor === dataDir : deps.dataDir() === dataDir
+      if (!ownContext) context = await deps.contextFor(dataDir)
+      if (owner && store && storeStillTheirs(root, dataDir, store, owner)) {
+        findingsFromIndicators(dataDir, context.records.indicators)
+      } else {
+        stale = true
+      }
     } catch {
       // The list below is whatever was already stored.
     }
     const findings = listFindings(dataDir).slice().reverse()
+    const now = ownerOfStore(root, dataDir)
     return {
       ok: true,
+      stale,
+      member: now ? { id: now.id, label_zh: now.label_zh, is_current: storeIsCurrent(root, dataDir) } : null,
       findings: findings.map((row) => ({
         id: row.id, date: row.date, kind: row.kind, text_zh: row.text_zh, grade: row.grade ?? '',
         ...(row.page_note_zh ? { page_note_zh: row.page_note_zh } : {}),

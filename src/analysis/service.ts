@@ -3,6 +3,7 @@
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { activePerson, personDir, readRegistry, rootDir, SELF, type Person } from '../people/store.ts'
+import { ownerOfStore, sameStore, storeIdentity } from '../member-store.ts'
 import { holderAuth, mintMemberLink, saveMemberLink } from '../people/mirobody.ts'
 import { homedir } from 'node:os'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
@@ -381,37 +382,6 @@ function findRun(dataDir: string, runId?: string | null, root?: string): { dir: 
 /** Whose store a run or an imported analysis belongs to (without the page comparison, which is taken at return time). */
 export interface AnalysisOwner { id: string; label_zh: string; is_current: boolean }
 
-function ownerOf(root: string, dataDir: string): Omit<AnalysisOwner, 'is_current'> | null {
-  if (dataDir === root) return { id: SELF, label_zh: '我' }
-  const person = readRegistry(root).people.find((row) => personDir(root, row.id) === dataDir)
-  return person ? { id: person.id, label_zh: person.label_zh } : null
-}
-
-/** A store's identity, so a record read for it is never applied to a store removed or replaced while it was read. */
-interface StoreIdentity { dev: number; ino: number; deleted: string }
-
-/** The delete tombstone's content: a cleared store keeps `privacy/deleted.json`, a live one has none. */
-function deletionStamp(dataDir: string): string {
-  try {
-    return readFileSync(join(dataDir, 'privacy', 'deleted.json'), 'utf8')
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === 'ENOENT' ? '' : 'unreadable'
-  }
-}
-
-function storeIdentity(dataDir: string): StoreIdentity | null {
-  try {
-    const stat = statSync(dataDir)
-    return stat.isDirectory() ? { dev: stat.dev, ino: stat.ino, deleted: deletionStamp(dataDir) } : null
-  } catch {
-    return null
-  }
-}
-
-function sameStore(before: StoreIdentity, after: StoreIdentity | null): boolean {
-  return after !== null && before.dev === after.dev && before.ino === after.ino && before.deleted === after.deleted
-}
-
 /** The run is still listed for its store: not abandoned, and its run list was not cleared with the store. */
 function runStillThere(dataDir: string, runId: string): boolean {
   return existsSync(join(dataDir, 'analysis', 'runs.jsonl')) && listRuns(dataDir).some((row) => row.id === runId)
@@ -443,7 +413,7 @@ export async function importLatest(deps: CoreDeps, runId?: string | null): Promi
   const { dir, run } = found
   // The analysis belongs to the member its run was started for. Pin whose store that is before any await: a member
   // removed, a store deleted, or a run abandoned while the record is read is then never written to.
-  const owner = ownerOf(root, dir)
+  const owner = ownerOfStore(root, dir)
   if (!owner) return { ok: false, error_zh: '这次分析所属的成员已不在，结果未导入。', problems: ['analysis owner no longer exists'] }
   const storeBefore = storeIdentity(dir)
   if (!storeBefore) return { ok: false, error_zh: '这次分析所属成员的存储已不在，结果未导入。', problems: ['analysis store no longer exists'] }
@@ -455,7 +425,7 @@ export async function importLatest(deps: CoreDeps, runId?: string | null): Promi
   const context = await ownerContext(deps, dir)
   // Re-check after the await: nothing is written into a member removed meanwhile, a store deleted or replaced, or a
   // run abandoned while its result was read.
-  const ownerAfter = ownerOf(root, dir)
+  const ownerAfter = ownerOfStore(root, dir)
   if (!ownerAfter || ownerAfter.id !== owner.id) return { ok: false, error_zh: '这次分析所属的成员已不在，结果未导入。', problems: ['analysis owner no longer exists'] }
   if (!sameStore(storeBefore, storeIdentity(dir))) return { ok: false, error_zh: '这次分析所属成员的存储已删除或变化，结果未导入。', problems: ['analysis store changed while importing'] }
   if (!runStillThere(dir, run.id)) return { ok: false, error_zh: '这次分析的结果已不在（可能已被放弃），未导入。', problems: ['analysis run abandoned or removed'] }

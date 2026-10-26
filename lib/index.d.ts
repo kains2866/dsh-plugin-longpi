@@ -5488,7 +5488,7 @@ declare function startRun(deps: CoreDeps, opts: {
 declare function abandon(deps: CoreDeps, runId: string): boolean;
 declare function statusNow(deps: CoreDeps): Promise<{
   runs: {
-    trigger: "ai" | "member";
+    trigger: "member" | "ai";
     reason_zh: string;
     id: string;
     started_at: string;
