@@ -5487,23 +5487,16 @@ declare function startRun(deps: CoreDeps, opts: {
   reasonZh: string;
 }): Promise<StartResult>;
 declare function abandon(deps: CoreDeps, runId: string): boolean;
+/**
+ * One run row of statusNow. A named type with explicit fields so the emitted declaration prints the trigger union in
+ * a fixed order: an inferred union printed in the checker's order changed between builds and made lib/ look stale.
+ */
+interface AnalysisRunRow extends RunStatus {
+  trigger: 'ai' | 'member';
+  reason_zh: string;
+}
 declare function statusNow(deps: CoreDeps): Promise<{
-  runs: {
-    trigger: "ai" | "member";
-    reason_zh: string;
-    id: string;
-    started_at: string;
-    workspace: string;
-    stages: Array<{
-      key: string;
-      label_zh: string;
-      done: boolean;
-    }>;
-    done: number;
-    report_ready: boolean;
-    active: boolean;
-    state_error: string | null;
-  }[];
+  runs: AnalysisRunRow[];
   current: {
     run_id: string;
     imported_at: string;

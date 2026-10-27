@@ -270,10 +270,19 @@ export function abandon(deps: CoreDeps, runId: string): boolean {
   return abandonRun(deps.dataDir(), runId)
 }
 
+/**
+ * One run row of statusNow. A named type with explicit fields so the emitted declaration prints the trigger union in
+ * a fixed order: an inferred union printed in the checker's order changed between builds and made lib/ look stale.
+ */
+export interface AnalysisRunRow extends RunStatus {
+  trigger: 'ai' | 'member'
+  reason_zh: string
+}
+
 export async function statusNow(deps: CoreDeps) {
   const dataDir = deps.dataDir()
   const listed = listRuns(dataDir).slice(-5).reverse()
-  const runs = listed.map((run) => ({ ...runStatus(run), trigger: run.trigger ?? 'member', reason_zh: run.reason_zh ?? '' }))
+  const runs: AnalysisRunRow[] = listed.map((run) => ({ ...runStatus(run), trigger: run.trigger ?? 'member', reason_zh: run.reason_zh ?? '' }))
   const context = await deps.context().catch(() => null)
   const ready = readiness(dataDir, deps.config(), context?.records ?? null, context?.today ?? new Date().toISOString().slice(0, 10))
   return { runs, current: currentSummary(dataDir), blockers: ready.blockers, readiness: ready }
