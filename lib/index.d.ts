@@ -197,6 +197,7 @@ declare function planApprovalReason(args: unknown): string;
 declare function resetReadBacks(): void;
 declare function registerApprovals(ctx: Context, opts?: {
   analysisBlocked?: () => boolean;
+  rootDir?: () => string;
 }): void;
 //#endregion
 //#region src/guard-scope.d.ts

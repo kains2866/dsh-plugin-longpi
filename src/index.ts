@@ -186,7 +186,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     }
   }
   // Saving a plan, starting a deep analysis: DSH asks the person first.
-  registerApprovals(ctx, { analysisBlocked: () => startBlockers(resolveDataDir(source().dataDir), source()) !== null })
+  registerApprovals(ctx, { analysisBlocked: () => startBlockers(resolveDataDir(source().dataDir), source()) !== null, rootDir: () => resolveRootDir(source().dataDir) })
   // Reminders follow the person selected on the page (their store holds their plan and settings); a family member's say whose.
   startFollowup(ctx, () => {
     const who = activePerson(resolveRootDir(config.dataDir))
